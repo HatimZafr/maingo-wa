@@ -1,0 +1,19 @@
+[whatsapp]
+allowlist = ["6281234567890", "6289876543210"]
+
+[llm]
+base_url = "http://localhost:20128/v1"
+api_key = ""
+model = "oc/minimax-m2.5-free"
+temperature = 0.7
+max_tool_rounds = 5
+
+[tools]
+definitions_dir = "tools/definitions"
+custom_dir = "tools/custom"
+shell_timeout_sec = 30
+http_timeout_sec = 15
+
+[session]
+db_path = "session.db"
+max_history = 50

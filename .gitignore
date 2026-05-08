@@ -1,0 +1,4 @@
+config.toml
+session.db
+whatsmeow.db
+*.db

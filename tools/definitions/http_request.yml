@@ -1,0 +1,19 @@
+name: http_request
+description: Kirim HTTP request ke URL eksternal. Gunakan untuk mengambil data dari API publik, cek status website, atau integrasi dengan layanan web.
+parameters:
+  - name: url
+    type: string
+    required: true
+    description: URL tujuan (harus HTTPS, tidak boleh IP private)
+    validation_regex: "^https://.*"
+  - name: method
+    type: string
+    required: false
+    description: HTTP method (GET, POST, PUT, DELETE)
+    enum: ["GET", "POST", "PUT", "DELETE"]
+executor:
+  type: http
+  method: "{{.method}}"
+  url: "{{.url}}"
+  headers:
+    User-Agent: "MaingoBot/1.0"

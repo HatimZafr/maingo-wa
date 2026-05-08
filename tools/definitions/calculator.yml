@@ -1,0 +1,10 @@
+name: calculator
+description: Hitung ekspresi matematika. Gunakan untuk perhitungan aritmatika sederhana maupun kompleks.
+parameters:
+  - name: expression
+    type: string
+    required: true
+    description: Ekspresi matematika (contoh: 2 + 2 * 3)
+executor:
+  type: shell
+  command: "python3 -c print({{.expression}})"
