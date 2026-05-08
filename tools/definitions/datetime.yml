@@ -4,7 +4,7 @@ parameters:
   - name: timezone
     type: string
     required: false
-    description: Zona waktu (contoh: Asia/Jakarta, UTC, America/New_York). Default: Asia/Jakarta
+    description: 'Zona waktu (contoh: Asia/Jakarta, UTC, America/New_York). Default: Asia/Jakarta'
 executor:
   type: shell
   command: "date"

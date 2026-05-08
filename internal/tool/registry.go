@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,15 +20,15 @@ import (
 )
 
 type ToolDef struct {
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Parameters  ParameterSchema  `json:"parameters"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  ParameterSchema `json:"parameters"`
 }
 
 type ParameterSchema struct {
-	Type       string                        `json:"type"`
-	Properties map[string]ParameterProp      `json:"properties"`
-	Required   []string                      `json:"required,omitempty"`
+	Type       string                   `json:"type"`
+	Properties map[string]ParameterProp `json:"properties"`
+	Required   []string                 `json:"required,omitempty"`
 }
 
 type ParameterProp struct {
@@ -42,8 +43,8 @@ type Tool interface {
 }
 
 type Registry struct {
-	tools   map[string]Tool
-	cfg     Config
+	tools map[string]Tool
+	cfg   Config
 }
 
 type Config struct {
@@ -94,11 +95,12 @@ func (r *Registry) Scan() error {
 		path := r.cfg.DefinitionsDir + "/" + entry.Name()
 		t, err := ParseYAMLTool(path, r.cfg)
 		if err != nil {
-			return fmt.Errorf("parse %s: %w", path, err)
+			fmt.Fprintf(os.Stderr, "[TOOL] Parse error %s: %v\n", entry.Name(), err)
+			continue
 		}
 		r.Register(t)
+		fmt.Printf("[TOOL] Loaded: %s\n", t.Metadata().Name)
 	}
-
 	return nil
 }
 
@@ -110,7 +112,6 @@ func (r *Registry) Execute(ctx context.Context, name string, argsJSON string) (s
 	return t.Execute(ctx, argsJSON)
 }
 
-// ParseYAMLTool creates a Tool from a YAML definition file.
 func ParseYAMLTool(path string, cfg Config) (Tool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -150,18 +151,18 @@ func ParseYAMLTool(path string, cfg Config) (Tool, error) {
 	}
 
 	return &yamlTool{
-		def:       toolDef,
-		params:    def.Parameters,
-		executor:  def.Executor,
-		cfg:       cfg,
+		def:      toolDef,
+		params:   def.Parameters,
+		executor: def.Executor,
+		cfg:      cfg,
 	}, nil
 }
 
 type yamlToolDef struct {
-	Name        string          `yaml:"name"`
-	Description string          `yaml:"description"`
-	Parameters  []yamlParam     `yaml:"parameters"`
-	Executor    yamlExecutor    `yaml:"executor"`
+	Name        string       `yaml:"name"`
+	Description string       `yaml:"description"`
+	Parameters  []yamlParam  `yaml:"parameters"`
+	Executor    yamlExecutor `yaml:"executor"`
 }
 
 type yamlParam struct {
@@ -174,12 +175,13 @@ type yamlParam struct {
 }
 
 type yamlExecutor struct {
-	Type    string            `yaml:"type"`
-	Command string            `yaml:"command,omitempty"`
-	URL     string            `yaml:"url,omitempty"`
-	Method  string            `yaml:"method,omitempty"`
-	Headers map[string]string `yaml:"headers,omitempty"`
-	Body    string            `yaml:"body,omitempty"`
+	Type          string            `yaml:"type"`
+	Command       string            `yaml:"command,omitempty"`
+	URL           string            `yaml:"url,omitempty"`
+	Method        string            `yaml:"method,omitempty"`
+	Headers       map[string]string `yaml:"headers,omitempty"`
+	Body          string            `yaml:"body,omitempty"`
+	TLSSkipVerify bool              `yaml:"tls_skip_verify,omitempty"`
 }
 
 type yamlTool struct {
@@ -198,11 +200,9 @@ func (t *yamlTool) Execute(ctx context.Context, argsJSON string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("parse arguments: %w", err)
 	}
-
 	if err := t.validate(args); err != nil {
 		return "", fmt.Errorf("validasi parameter: %w", err)
 	}
-
 	switch t.executor.Type {
 	case "shell":
 		return t.executeShell(ctx, args)
@@ -252,15 +252,13 @@ func (t *yamlTool) executeShell(ctx context.Context, args map[string]string) (st
 	if len(parts) == 0 {
 		return "", fmt.Errorf("command kosong")
 	}
-
 	timeout := time.Duration(t.cfg.ShellTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(output), fmt.Errorf("command error: %w — output: %s", err, string(output))
+		return string(output), fmt.Errorf("command error: %w", err)
 	}
 	return string(output), nil
 }
@@ -269,12 +267,11 @@ func (t *yamlTool) executeRawShell(ctx context.Context, args map[string]string) 
 	timeout := time.Duration(t.cfg.ShellTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
 	script := substitute(t.executor.Command, args)
 	cmd := exec.CommandContext(ctx, "sh", "-c", script)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(output), fmt.Errorf("raw_shell error: %w — output: %s", err, string(output))
+		return string(output), fmt.Errorf("raw_shell error: %w", err)
 	}
 	return string(output), nil
 }
@@ -284,63 +281,61 @@ func (t *yamlTool) executeHTTP(ctx context.Context, args map[string]string) (str
 	if method == "" {
 		method = "GET"
 	}
-
 	targetURL := substitute(t.executor.URL, args)
-
 	parsed, err := url.Parse(targetURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid URL: %w", err)
 	}
-
 	if err := validateURL(parsed); err != nil {
 		return "", fmt.Errorf("URL tidak diizinkan: %w", err)
 	}
-
 	var body io.Reader
 	if t.executor.Body != "" {
 		body = strings.NewReader(substitute(t.executor.Body, args))
 	}
-
 	timeout := time.Duration(t.cfg.HTTPTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
 	req, err := http.NewRequestWithContext(ctx, method, targetURL, body)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
-
 	for k, v := range t.executor.Headers {
 		req.Header.Set(k, substitute(v, args))
 	}
-
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: t.executor.TLSSkipVerify,
+		},
+	}
 	client := &http.Client{
-		Timeout: timeout,
+		Timeout:   timeout,
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects")
 			}
-			dest := req.URL
-			if dest != nil {
-				return validateURL(dest)
+			if req.URL != nil {
+				return validateURL(req.URL)
 			}
 			return nil
 		},
 	}
-
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("http request: %w", err)
 	}
 	defer resp.Body.Close()
-
-	limited := io.LimitReader(resp.Body, 1<<20) // 1MB
+	limited := io.LimitReader(resp.Body, 256<<10)
 	data, err := io.ReadAll(limited)
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
 	}
-
-	return string(data), nil
+	if len(data) == 0 {
+		return "", fmt.Errorf("response body kosong (status: %d)", resp.StatusCode)
+	}
+	result := fmt.Sprintf("Status: %d\n%s", resp.StatusCode, string(data))
+	return truncateStr(result, 32<<10), nil
 }
 
 func validateURL(u *url.URL) error {
@@ -380,5 +375,9 @@ func substitute(template string, args map[string]string) string {
 	return result
 }
 
-// json is a lightweight wrapper to avoid import conflict with encoding/json in parseArgs.
-// parseArgs uses stdlib encoding/json imported above; this file does not import encoding/json at top level.
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}

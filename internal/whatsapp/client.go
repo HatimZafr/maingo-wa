@@ -3,18 +3,21 @@ package whatsapp
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"go.mau.fi/whatsmeow"
+	waE2E "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-	waE2E "go.mau.fi/whatsmeow/binary/proto"
 	waLog "go.mau.fi/whatsmeow/util/log"
+	"github.com/mdp/qrterminal/v3"
 	"google.golang.org/protobuf/proto"
 )
 
-type MessageHandler func(ctx context.Context, senderPhone string, messageText string) error
+type MessageHandler func(ctx context.Context, senderPhone string, chatJID types.JID, messageID types.MessageID, messageText string) error
 
 type Client struct {
 	client    *whatsmeow.Client
@@ -34,7 +37,7 @@ func NewClient(allowlist []string) (*Client, error) {
 		return nil, fmt.Errorf("get device: %w", err)
 	}
 
-	clientLog := waLog.Stdout("WhatsApp", "INFO", false)
+	clientLog := waLog.Stdout("WhatsApp", "WARN", false)
 	client := whatsmeow.NewClient(deviceStore, clientLog)
 	client.EnableAutoReconnect = true
 	client.AutoTrustIdentity = true
@@ -57,27 +60,43 @@ func (c *Client) SetMessageHandler(h MessageHandler) {
 	c.client.AddEventHandler(func(evt interface{}) {
 		switch v := evt.(type) {
 		case *events.Message:
-			text := v.Message.GetConversation()
-			if text == "" {
-				return
-			}
 			phone := extractPhone(v.Info.Sender.User)
+			conversation := v.Message.GetConversation()
+			extended := v.Message.GetExtendedTextMessage()
+
+			var text string
+			if conversation != "" {
+				text = conversation
+			} else if extended != nil {
+				text = extended.GetText()
+			}
+
+			if text == "" {
+				return // non-teks (gambar, stiker, link preview, dll) — abaikan
+			}
 			if !c.allowlist[phone] {
 				return
 			}
 			if c.handler != nil {
-				_ = c.handler(context.Background(), phone, text)
+				_ = c.handler(context.Background(), phone, v.Info.Chat, v.Info.ID, text)
 			}
+
 		case *events.Connected:
-			fmt.Println("[WhatsApp] Connected")
+			fmt.Println("[WA] Connected")
 		case *events.PairSuccess:
-			fmt.Printf("[WhatsApp] Pair success — JID: %s\n", v.ID)
+			fmt.Printf("[WA] Pair success — %s\n", v.ID)
 		case *events.LoggedOut:
-			fmt.Println("[WhatsApp] Logged out — perlu re-pair")
+			fmt.Println("[WA] Logged out — restart untuk re-pair")
 		case *events.QR:
-			for i, code := range v.Codes {
-				fmt.Printf("QR Code %d: %s\n", i+1, code)
+			if len(v.Codes) > 0 {
+				fmt.Println("\n=== Scan QR ini di WhatsApp (Linked Devices) ===")
+				qrterminal.GenerateHalfBlock(v.Codes[0], qrterminal.L, os.Stdout)
+				fmt.Println()
 			}
+		case *events.QRScannedWithoutMultidevice:
+			fmt.Println("[WA] Multi-Device belum aktif! Buka WhatsApp → Settings → Linked Devices → aktifkan")
+		case *events.PairError:
+			fmt.Println("[WA] Pairing error — coba scan ulang")
 		}
 	})
 }
@@ -86,15 +105,23 @@ func (c *Client) Connect(ctx context.Context) error {
 	return c.client.ConnectContext(ctx)
 }
 
-func (c *Client) SendReply(ctx context.Context, recipientPhone string, text string) error {
-	jid := types.NewJID(recipientPhone, types.DefaultUserServer)
+func (c *Client) SendTyping(ctx context.Context, chatJID types.JID) error {
+	return c.client.SendChatPresence(ctx, chatJID, types.ChatPresenceComposing, types.ChatPresenceMediaText)
+}
+
+func (c *Client) MarkRead(ctx context.Context, chatJID, senderJID types.JID, msgID types.MessageID) error {
+	return c.client.MarkRead(ctx, []types.MessageID{msgID}, time.Now(), chatJID, senderJID)
+}
+
+func (c *Client) SendReply(ctx context.Context, chatJID types.JID, text string) error {
 	msg := &waE2E.Message{
 		Conversation: proto.String(text),
 	}
-	_, err := c.client.SendMessage(ctx, jid, msg)
+	_, err := c.client.SendMessage(ctx, chatJID, msg)
 	if err != nil {
 		return fmt.Errorf("send message: %w", err)
 	}
+	fmt.Printf("[WA] Reply terkirim ke %s\n", chatJID.User)
 	return nil
 }
 

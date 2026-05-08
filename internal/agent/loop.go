@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
+
+	"go.mau.fi/whatsmeow/types"
 
 	"maingo/internal/llm"
 	"maingo/internal/session"
@@ -23,7 +26,9 @@ type Config struct {
 }
 
 type WhatsAppSender interface {
-	SendReply(ctx context.Context, phone, text string) error
+	SendReply(ctx context.Context, chatJID types.JID, text string) error
+	SendTyping(ctx context.Context, chatJID types.JID) error
+	MarkRead(ctx context.Context, chatJID, senderJID types.JID, msgID types.MessageID) error
 }
 
 type LLMClient interface {
@@ -53,9 +58,19 @@ func New(cfg Config) *Agent {
 	}
 }
 
-func (a *Agent) HandleMessage(ctx context.Context, senderPhone string, messageText string) error {
+func (a *Agent) HandleMessage(ctx context.Context, senderPhone string, chatJID types.JID, msgID types.MessageID, messageText string) error {
+	fmt.Printf("[AGENT] %s: %q\n", senderPhone, messageText)
+
+	// Read receipt → centang biru
+	if err := a.wa.MarkRead(ctx, chatJID, types.JID{}, msgID); err != nil {
+		fmt.Printf("[AGENT] MarkRead error: %v\n", err)
+	}
+	// Typing indicator
+	if err := a.wa.SendTyping(ctx, chatJID); err != nil {
+		fmt.Printf("[AGENT] SendTyping error: %v\n", err)
+	}
 	if len(messageText) > maxInputLength {
-		return a.wa.SendReply(ctx, senderPhone, "Maaf, pesan terlalu panjang (maks 4000 karakter).")
+		return a.wa.SendReply(ctx, chatJID, "Maaf, pesan terlalu panjang (maks 4000 karakter).")
 	}
 
 	history, err := a.sessions.Load(senderPhone)
@@ -74,9 +89,11 @@ func (a *Agent) HandleMessage(ctx context.Context, senderPhone string, messageTe
 	defer cancel()
 
 	for round := 0; round < a.maxRounds; round++ {
+		// fmt.Printf("[AGENT] LLM round %d/%d...\n", round+1, a.maxRounds)
 		resp, err := a.llm.Chat(ctx, llmMessages, toolDefs)
 		if err != nil {
-			_ = a.wa.SendReply(ctx, senderPhone, "Maaf, ada kendala teknis. Coba lagi nanti.")
+			fmt.Printf("[AGENT] LLM error: %v\n", err)
+			_ = a.wa.SendReply(ctx, chatJID, "Maaf, ada kendala teknis. Coba lagi nanti.")
 			return fmt.Errorf("LLM call: %w", err)
 		}
 
@@ -89,8 +106,8 @@ func (a *Agent) HandleMessage(ctx context.Context, senderPhone string, messageTe
 				return fmt.Errorf("save session: %w", err)
 			}
 
-			reply := truncate(msg.Content, 4096)
-			return a.wa.SendReply(ctx, senderPhone, reply)
+			reply := cleanWhatsApp(msg.Content)
+			return a.wa.SendReply(ctx, chatJID, reply)
 		}
 
 		// Execute tool calls
@@ -114,10 +131,10 @@ func (a *Agent) HandleMessage(ctx context.Context, senderPhone string, messageTe
 	if lastMsg.Content != "" {
 		history = appendSessionMessages(history, messageText, lastMsg.Content)
 		_ = a.sessions.Save(senderPhone, history)
-		return a.wa.SendReply(ctx, senderPhone, truncate(lastMsg.Content, 4096))
+		return a.wa.SendReply(ctx, chatJID, cleanWhatsApp(lastMsg.Content))
 	}
 
-	return a.wa.SendReply(ctx, senderPhone, "Maaf, percakapan terlalu panjang. Silakan ulangi pertanyaan Anda.")
+	return a.wa.SendReply(ctx, chatJID, "Maaf, percakapan terlalu panjang. Silakan ulangi pertanyaan Anda.")
 }
 
 func buildMessages(systemPrompt string, history []session.Message, userText string) []llm.ChatMessage {
@@ -173,12 +190,32 @@ func toolDefToLLM(td tool.ToolDef) llm.ToolDefinition {
 	}
 }
 
+var (
+	mdH3      = regexp.MustCompile(`(?m)^###\s+.*\n?`)
+	mdTable   = regexp.MustCompile(`(?m)^\|.*\|.*\n?`)
+	mdTableSep = regexp.MustCompile(`(?m)^\|[\s\-:|]+\|\s*\n?`)
+	mdHr      = regexp.MustCompile(`(?m)^---+\s*\n?`)
+	mdBr      = regexp.MustCompile(`<br\s*/?>`)
+	multiNL   = regexp.MustCompile(`\n{3,}`)
+)
+
+func cleanWhatsApp(s string) string {
+	s = mdH3.ReplaceAllString(s, "")
+	s = mdTable.ReplaceAllString(s, "")
+	s = mdTableSep.ReplaceAllString(s, "")
+	s = mdHr.ReplaceAllString(s, "")
+	s = mdBr.ReplaceAllString(s, "\n")
+	s = multiNL.ReplaceAllString(s, "\n\n")
+	s = strings.TrimSpace(s)
+	if len(s) > 4000 {
+		s = s[:3997] + "..."
+	}
+	return s
+}
+
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
 	return s[:maxLen-3] + "..."
 }
-
-// json package needed by tool.Execute which calls parseArgs
-var _ = json.Valid

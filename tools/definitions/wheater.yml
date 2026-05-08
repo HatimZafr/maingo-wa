@@ -1,0 +1,10 @@
+name: weather
+description: Gunakan tool ini ketika pengguna menanyakan cuaca, suhu, hujan, panas, atau kondisi cuaca suatu kota.
+parameters:
+  - name: city
+    type: string
+    required: true
+executor:
+  type: http
+  method: GET
+  url: "https://wttr.in/{{.city}}?format=j1"

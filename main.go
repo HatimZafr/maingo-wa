@@ -53,6 +53,7 @@ func main() {
 		HTTPTimeoutSec:  cfg.Tools.HTTPTimeoutSec,
 	}
 	toolRegistry := tool.NewRegistry(toolCfg)
+	tool.RegisterBuiltins(toolRegistry)
 	if err := toolRegistry.Scan(); err != nil {
 		log.Fatalf("Gagal scan tools: %v", err)
 	}
