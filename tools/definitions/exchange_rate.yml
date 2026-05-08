@@ -1,0 +1,10 @@
+name: exchange_rate
+description: Ambil kurs mata uang terbaru.
+parameters:
+  - name: base
+    type: string
+    required: true
+executor:
+  type: http
+  method: GET
+  url: "https://open.er-api.com/v6/latest/{{.base}}"
