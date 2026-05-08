@@ -109,6 +109,10 @@ func (c *Client) SendTyping(ctx context.Context, chatJID types.JID) error {
 	return c.client.SendChatPresence(ctx, chatJID, types.ChatPresenceComposing, types.ChatPresenceMediaText)
 }
 
+func (c *Client) SendTypingStop(ctx context.Context, chatJID types.JID) error {
+	return c.client.SendChatPresence(ctx, chatJID, types.ChatPresencePaused, types.ChatPresenceMediaText)
+}
+
 func (c *Client) MarkRead(ctx context.Context, chatJID, senderJID types.JID, msgID types.MessageID) error {
 	return c.client.MarkRead(ctx, []types.MessageID{msgID}, time.Now(), chatJID, senderJID)
 }

@@ -1,0 +1,85 @@
+name: todo_api
+description: Gunakan tool ini untuk mengelola todo list pengguna seperti melihat daftar tugas, membuat tugas baru, mengedit tugas, atau menghapus tugas.
+
+parameters:
+  - name: action
+    type: string
+    required: true
+    enum:
+      - list
+      - detail
+      - create
+      - update
+      - delete
+
+  - name: id
+    type: string
+    required: false
+    description: ID todo, digunakan untuk detail, update, dan delete.
+
+  - name: title
+    type: string
+    required: false
+    description: Judul todo.
+
+  - name: description
+    type: string
+    required: false
+    description: Deskripsi todo.
+
+  - name: completed
+    type: boolean
+    required: false
+    description: Status selesai atau belum.
+
+  - name: dueDate
+    type: string
+    required: false
+    description: Deadline todo dalam format ISO date.
+
+executor:
+  type: http
+
+  routes:
+    - when:
+        action: list
+      method: GET
+      url: "https://69fdf3788c70b15fa3ca00ff.mockapi.io/api/v1/todo"
+
+    - when:
+        action: detail
+      method: GET
+      url: "https://69fdf3788c70b15fa3ca00ff.mockapi.io/api/v1/todo/{{.id}}"
+
+    - when:
+        action: create
+      method: POST
+      url: "https://69fdf3788c70b15fa3ca00ff.mockapi.io/api/v1/todo"
+      headers:
+        Content-Type: application/json
+      body: |
+        {
+          "title": "{{.title}}",
+          "description": "{{.description}}",
+          "completed": {{.completed}},
+          "dueDate": "{{.dueDate}}"
+        }
+
+    - when:
+        action: update
+      method: PUT
+      url: "https://69fdf3788c70b15fa3ca00ff.mockapi.io/api/v1/todo/{{.id}}"
+      headers:
+        Content-Type: application/json
+      body: |
+        {
+          "title": "{{.title}}",
+          "description": "{{.description}}",
+          "completed": {{.completed}},
+          "dueDate": "{{.dueDate}}"
+        }
+
+    - when:
+        action: delete
+      method: DELETE
+      url: "https://69fdf3788c70b15fa3ca00ff.mockapi.io/api/v1/todo/{{.id}}"

@@ -28,6 +28,7 @@ type Config struct {
 type WhatsAppSender interface {
 	SendReply(ctx context.Context, chatJID types.JID, text string) error
 	SendTyping(ctx context.Context, chatJID types.JID) error
+	SendTypingStop(ctx context.Context, chatJID types.JID) error
 	MarkRead(ctx context.Context, chatJID, senderJID types.JID, msgID types.MessageID) error
 }
 
@@ -62,15 +63,12 @@ func (a *Agent) HandleMessage(ctx context.Context, senderPhone string, chatJID t
 	fmt.Printf("[AGENT] %s: %q\n", senderPhone, messageText)
 
 	// Read receipt → centang biru
-	if err := a.wa.MarkRead(ctx, chatJID, types.JID{}, msgID); err != nil {
-		fmt.Printf("[AGENT] MarkRead error: %v\n", err)
-	}
+	_ = a.wa.MarkRead(ctx, chatJID, types.JID{}, msgID)
 	// Typing indicator
-	if err := a.wa.SendTyping(ctx, chatJID); err != nil {
-		fmt.Printf("[AGENT] SendTyping error: %v\n", err)
-	}
+	_ = a.wa.SendTyping(ctx, chatJID)
 	if len(messageText) > maxInputLength {
-		return a.wa.SendReply(ctx, chatJID, "Maaf, pesan terlalu panjang (maks 4000 karakter).")
+		_ = a.wa.SendTypingStop(ctx, chatJID)
+				return a.wa.SendReply(ctx, chatJID, "Maaf, pesan terlalu panjang (maks 4000 karakter).")
 	}
 
 	history, err := a.sessions.Load(senderPhone)
@@ -107,7 +105,8 @@ func (a *Agent) HandleMessage(ctx context.Context, senderPhone string, chatJID t
 			}
 
 			reply := cleanWhatsApp(msg.Content)
-			return a.wa.SendReply(ctx, chatJID, reply)
+			_ = a.wa.SendTypingStop(ctx, chatJID)
+				return a.wa.SendReply(ctx, chatJID, reply)
 		}
 
 		// Execute tool calls
@@ -131,10 +130,12 @@ func (a *Agent) HandleMessage(ctx context.Context, senderPhone string, chatJID t
 	if lastMsg.Content != "" {
 		history = appendSessionMessages(history, messageText, lastMsg.Content)
 		_ = a.sessions.Save(senderPhone, history)
-		return a.wa.SendReply(ctx, chatJID, cleanWhatsApp(lastMsg.Content))
+		_ = a.wa.SendTypingStop(ctx, chatJID)
+				return a.wa.SendReply(ctx, chatJID, cleanWhatsApp(lastMsg.Content))
 	}
 
-	return a.wa.SendReply(ctx, chatJID, "Maaf, percakapan terlalu panjang. Silakan ulangi pertanyaan Anda.")
+	_ = a.wa.SendTypingStop(ctx, chatJID)
+				return a.wa.SendReply(ctx, chatJID, "Maaf, percakapan terlalu panjang. Silakan ulangi pertanyaan Anda.")
 }
 
 func buildMessages(systemPrompt string, history []session.Message, userText string) []llm.ChatMessage {

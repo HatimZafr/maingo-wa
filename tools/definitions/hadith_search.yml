@@ -1,0 +1,11 @@
+name: hadith_search
+description: Gunakan tool ini ketika pengguna meminta pencarian hadis, takhrij hadis, atau hadis berdasarkan kata kunci Arab.
+parameters:
+  - name: query
+    type: string
+    required: true
+    description: Kata atau potongan teks hadis dalam bahasa Arab.
+executor:
+  type: http
+  method: GET
+  url: "https://dorar.net/dorar_api.json?skey={{.query}}"

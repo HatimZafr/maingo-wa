@@ -182,6 +182,15 @@ type yamlExecutor struct {
 	Headers       map[string]string `yaml:"headers,omitempty"`
 	Body          string            `yaml:"body,omitempty"`
 	TLSSkipVerify bool              `yaml:"tls_skip_verify,omitempty"`
+	Routes        []yamlRoute       `yaml:"routes,omitempty"`
+}
+
+type yamlRoute struct {
+	When    map[string]string `yaml:"when"`
+	Method  string            `yaml:"method,omitempty"`
+	URL     string            `yaml:"url,omitempty"`
+	Headers map[string]string `yaml:"headers,omitempty"`
+	Body    string            `yaml:"body,omitempty"`
 }
 
 type yamlTool struct {
@@ -203,16 +212,48 @@ func (t *yamlTool) Execute(ctx context.Context, argsJSON string) (string, error)
 	if err := t.validate(args); err != nil {
 		return "", fmt.Errorf("validasi parameter: %w", err)
 	}
-	switch t.executor.Type {
-	case "shell":
-		return t.executeShell(ctx, args)
-	case "http":
-		return t.executeHTTP(ctx, args)
-	case "raw_shell":
-		return t.executeRawShell(ctx, args)
-	default:
-		return "", fmt.Errorf("executor type tidak dikenal: %s", t.executor.Type)
+
+	e := t.executor
+
+	// Route matching: cari route yang "when" conditions-nya cocok dengan args
+	if len(e.Routes) > 0 {
+		route := t.matchRoute(args)
+		if route == nil {
+			return "", fmt.Errorf("tidak ada route yang cocok untuk parameter: %v", args)
+		}
+		e.Method = route.Method
+		e.URL = route.URL
+		e.Headers = route.Headers
+		e.Body = route.Body
 	}
+
+	switch e.Type {
+	case "shell":
+		return t.executeShell(ctx, args, e)
+	case "http":
+		return t.executeHTTP(ctx, args, e)
+	case "raw_shell":
+		return t.executeRawShell(ctx, args, e)
+	default:
+		return "", fmt.Errorf("executor type tidak dikenal: %s", e.Type)
+	}
+}
+
+func (t *yamlTool) matchRoute(args map[string]string) *yamlRoute {
+	for i := range t.executor.Routes {
+		r := &t.executor.Routes[i]
+		match := true
+		for k, v := range r.When {
+			if args[k] != v {
+				match = false
+				break
+			}
+		}
+		if match {
+			return r
+		}
+	}
+	return nil
 }
 
 func (t *yamlTool) validate(args map[string]string) error {
@@ -247,8 +288,8 @@ func (t *yamlTool) validate(args map[string]string) error {
 	return nil
 }
 
-func (t *yamlTool) executeShell(ctx context.Context, args map[string]string) (string, error) {
-	parts := strings.Fields(substitute(t.executor.Command, args))
+func (t *yamlTool) executeShell(ctx context.Context, args map[string]string, e yamlExecutor) (string, error) {
+	parts := strings.Fields(substitute(e.Command, args))
 	if len(parts) == 0 {
 		return "", fmt.Errorf("command kosong")
 	}
@@ -263,11 +304,11 @@ func (t *yamlTool) executeShell(ctx context.Context, args map[string]string) (st
 	return string(output), nil
 }
 
-func (t *yamlTool) executeRawShell(ctx context.Context, args map[string]string) (string, error) {
+func (t *yamlTool) executeRawShell(ctx context.Context, args map[string]string, e yamlExecutor) (string, error) {
 	timeout := time.Duration(t.cfg.ShellTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	script := substitute(t.executor.Command, args)
+	script := substitute(e.Command, args)
 	cmd := exec.CommandContext(ctx, "sh", "-c", script)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -276,12 +317,12 @@ func (t *yamlTool) executeRawShell(ctx context.Context, args map[string]string) 
 	return string(output), nil
 }
 
-func (t *yamlTool) executeHTTP(ctx context.Context, args map[string]string) (string, error) {
-	method := t.executor.Method
+func (t *yamlTool) executeHTTP(ctx context.Context, args map[string]string, e yamlExecutor) (string, error) {
+	method := e.Method
 	if method == "" {
 		method = "GET"
 	}
-	targetURL := substitute(t.executor.URL, args)
+	targetURL := substitute(e.URL, args)
 	parsed, err := url.Parse(targetURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid URL: %w", err)
@@ -290,8 +331,8 @@ func (t *yamlTool) executeHTTP(ctx context.Context, args map[string]string) (str
 		return "", fmt.Errorf("URL tidak diizinkan: %w", err)
 	}
 	var body io.Reader
-	if t.executor.Body != "" {
-		body = strings.NewReader(substitute(t.executor.Body, args))
+	if e.Body != "" {
+		body = strings.NewReader(substitute(e.Body, args))
 	}
 	timeout := time.Duration(t.cfg.HTTPTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -300,12 +341,12 @@ func (t *yamlTool) executeHTTP(ctx context.Context, args map[string]string) (str
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
-	for k, v := range t.executor.Headers {
+	for k, v := range e.Headers {
 		req.Header.Set(k, substitute(v, args))
 	}
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: t.executor.TLSSkipVerify,
+			InsecureSkipVerify: e.TLSSkipVerify,
 		},
 	}
 	client := &http.Client{
