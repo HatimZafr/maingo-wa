@@ -1,0 +1,10 @@
+name: mayar
+description: 'Jalankan Mayar CLI (payment platform). Gunakan sesuai petunjuk di system prompt (## Mayar CLI — Agent Skill). Pastikan selalu pakai flag --json.'
+parameters:
+  - name: command
+    type: string
+    required: true
+    description: 'Perintah mayar lengkap dengan flag. Contoh: "whoami --json" atau "invoice list --page 1 --json"'
+executor:
+  type: raw_shell
+  command: 'npx -y mayar@latest {{.command}}'

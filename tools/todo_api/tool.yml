@@ -1,0 +1,92 @@
+name: todo_api
+description: Gunakan tool ini untuk mengelola todo list pengguna seperti melihat daftar tugas, membuat tugas baru, mengedit tugas, menghapus tugas, filtering, dan pagination.
+
+parameters:
+  - name: action
+    type: string
+    required: true
+    enum:
+      - list
+      - detail
+      - create
+      - update
+      - delete
+
+  - name: id
+    type: string
+    required: false
+    description: ID todo/task.
+
+  - name: title
+    type: string
+    required: false
+    description: Judul task.
+
+  - name: completed
+    type: boolean
+    required: false
+    description: Status task selesai atau belum.
+
+  - name: page
+    type: number
+    required: false
+    description: Nomor halaman pagination.
+
+  - name: limit
+    type: number
+    required: false
+    description: Jumlah data per halaman.
+
+executor:
+  type: http
+
+  routes:
+    # LIST TASKS
+    - when:
+        action: list
+      method: GET
+      url: "https://69fdf3788c70b15fa3ca00ff.mockapi.io/api/v1/tasks?page={{.page}}&limit={{.limit}}&completed={{.completed}}"
+      headers:
+        content-type: application/json
+
+    # DETAIL TASK
+    - when:
+        action: detail
+      method: GET
+      url: "https://69fdf3788c70b15fa3ca00ff.mockapi.io/api/v1/tasks/{{.id}}"
+      headers:
+        content-type: application/json
+
+    # CREATE TASK
+    - when:
+        action: create
+      method: POST
+      url: "https://69fdf3788c70b15fa3ca00ff.mockapi.io/api/v1/tasks"
+      headers:
+        content-type: application/json
+      body: |
+        {
+          "title": "{{.title}}",
+          "completed": {{.completed}}
+        }
+
+    # UPDATE TASK
+    - when:
+        action: update
+      method: PUT
+      url: "https://69fdf3788c70b15fa3ca00ff.mockapi.io/api/v1/tasks/{{.id}}"
+      headers:
+        content-type: application/json
+      body: |
+        {
+          "title": "{{.title}}",
+          "completed": {{.completed}}
+        }
+
+    # DELETE TASK
+    - when:
+        action: delete
+      method: DELETE
+      url: "https://69fdf3788c70b15fa3ca00ff.mockapi.io/api/v1/tasks/{{.id}}"
+      headers:
+        content-type: application/json

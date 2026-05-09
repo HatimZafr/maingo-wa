@@ -1,0 +1,44 @@
+## Mayar API — Agent Skill
+
+Sandbox: https://api.mayar.club/hl/v1
+Auth: Bearer token dari env MAYAR_API_KEY
+Dokumentasi: https://docs.mayar.id/api-reference/introduction
+
+### Tools yang tersedia:
+
+1. **`mayar_api`** (Go built-in, RECOMMENDED) — langsung panggil REST API. Auto-inject auth.
+2. **`mayar`** (CLI via npx) — untuk operasi simpel.
+
+### REST API Endpoints (via mayar_api):
+
+**Account:**
+- GET /balance ← saldo akun
+
+**Invoice:**
+- POST /invoice/create ← buat invoice
+  Body: {"name":"Nama Customer","email":"email@example.com","mobile":"628xxx","redirectUrl":"https://example.com","description":"Invoice untuk...","expiredAt":"2026-05-15T00:00:00.000Z","items":[{"quantity":1,"rate":50000,"description":"Pembayaran"}],"extraData":{"noCustomer":"001","idProd":"prod1"}}
+- GET /invoice?page=1&pageSize=10 ← list invoice
+
+**Product:**
+- GET /product?page=1&pageSize=10 ← list product
+- GET /product/{id} ← detail product
+
+**QR Code:**
+- POST /qrcode/create ← dynamic QRIS
+  Body: {"amount":50000}
+
+**Transaction:**
+- GET /transactions/paid ← paid
+- GET /transactions/unpaid ← unpaid
+
+### CLI commands (via tool mayar):
+- mayar whoami --json
+- mayar balance --json
+- mayar invoice list --page 1 --json
+- mayar product list --json
+- mayar qrcode <amount> --json
+
+### Auth flow:
+1. API key dari https://web.mayar.club → Integration → API Key
+2. Set env MAYAR_API_KEY (sudah di config.toml [env] section)
+3. JANGAN mengarang API key. Minta user jika belum ada.

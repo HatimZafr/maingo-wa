@@ -48,8 +48,6 @@ type Registry struct {
 }
 
 type Config struct {
-	DefinitionsDir  string
-	CustomDir       string
 	ShellTimeoutSec int
 	HTTPTimeoutSec  int
 }
@@ -83,25 +81,28 @@ func (r *Registry) Count() int {
 }
 
 func (r *Registry) Scan() error {
-	entries, err := os.ReadDir(r.cfg.DefinitionsDir)
+	entries, err := os.ReadDir("tools")
 	if err != nil {
-		return fmt.Errorf("read definitions dir %s: %w", r.cfg.DefinitionsDir, err)
+		return fmt.Errorf("read tools dir: %w", err)
 	}
-
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yml") && !strings.HasSuffix(entry.Name(), ".yaml") {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		path := r.cfg.DefinitionsDir + "/" + entry.Name()
-		t, err := ParseYAMLTool(path, r.cfg)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[TOOL] Parse error %s: %v\n", entry.Name(), err)
-			continue
-		}
-		r.Register(t)
-		fmt.Printf("[TOOL] Loaded: %s\n", t.Metadata().Name)
+		path := "tools/" + entry.Name() + "/tool.yml"
+		r.loadYAML(path)
 	}
 	return nil
+}
+
+func (r *Registry) loadYAML(path string) {
+	t, err := ParseYAMLTool(path, r.cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[TOOL] Parse error %s: %v\n", path, err)
+		return
+	}
+	r.Register(t)
+	fmt.Printf("[TOOL] Loaded: %s\n", t.Metadata().Name)
 }
 
 func (r *Registry) Execute(ctx context.Context, name string, argsJSON string) (string, error) {

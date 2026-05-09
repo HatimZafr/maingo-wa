@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+	"time"
 
 	"maingo/internal/agent"
 	"maingo/internal/config"
@@ -31,6 +34,14 @@ func main() {
 	if sp, err := config.LoadSystemPrompt("system-prompt.txt"); err == nil {
 		systemPrompt = sp
 	}
+	// Load semua tools/*/skill.txt sebagai tambahan system prompt
+	skillFiles, _ := filepath.Glob("tools/*/skill.txt")
+	for _, sf := range skillFiles {
+		if skill, err := config.LoadSystemPrompt(sf); err == nil {
+			systemPrompt += "\n\n" + skill
+			fmt.Printf("[SKILL] Loaded: %s\n", sf)
+		}
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -47,13 +58,12 @@ func main() {
 
 	// Tool registry
 	toolCfg := tool.Config{
-		DefinitionsDir:  cfg.Tools.DefinitionsDir,
-		CustomDir:       cfg.Tools.CustomDir,
 		ShellTimeoutSec: cfg.Tools.ShellTimeoutSec,
 		HTTPTimeoutSec:  cfg.Tools.HTTPTimeoutSec,
 	}
 	toolRegistry := tool.NewRegistry(toolCfg)
 	tool.RegisterBuiltins(toolRegistry)
+	tool.RegisterMayarTools(toolRegistry)
 	if err := toolRegistry.Scan(); err != nil {
 		log.Fatalf("Gagal scan tools: %v", err)
 	}
@@ -81,6 +91,13 @@ func main() {
 	if err := waClient.Connect(ctx); err != nil {
 		log.Fatalf("Gagal connect WhatsApp: %v", err)
 	}
+
+	fmt.Println("Warming up npx mayar...")
+	go func() {
+		exec.Command("npx", "-y", "mayar@latest", "whoami", "--json").Run()
+		fmt.Println("[WARMUP] npx mayar ready")
+	}()
+	time.Sleep(3 * time.Second)
 
 	fmt.Println("Bot berjalan. Tekan Ctrl+C untuk berhenti.")
 

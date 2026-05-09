@@ -3,6 +3,8 @@ package whatsapp
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -117,6 +119,60 @@ func (c *Client) MarkRead(ctx context.Context, chatJID, senderJID types.JID, msg
 	return c.client.MarkRead(ctx, []types.MessageID{msgID}, time.Now(), chatJID, senderJID)
 }
 
+func (c *Client) SendImage(ctx context.Context, chatJID types.JID, imageURL, caption string) error {
+	fmt.Printf("[WA] Download image %s\n", imageURL)
+	data, err := httpGet(imageURL)
+	if err != nil {
+		return fmt.Errorf("download image: %w", err)
+	}
+	fmt.Printf("[WA] Downloaded %d bytes\n", len(data))
+	if len(data) < 100 {
+		return fmt.Errorf("image terlalu kecil (%d bytes)", len(data))
+	}
+
+	mime := "image/png"
+	switch {
+	case bytesHasPrefix(data, []byte{0xFF, 0xD8}):
+		mime = "image/jpeg"
+	case bytesHasPrefix(data, []byte{'G', 'I', 'F'}):
+		mime = "image/gif"
+	case bytesHasPrefix(data, []byte{'R', 'I', 'F'}):
+		mime = "image/webp"
+	}
+	fmt.Printf("[WA] Upload ke WhatsApp (%s, %d bytes)\n", mime, len(data))
+
+	upload, err := c.client.Upload(ctx, data, whatsmeow.MediaImage)
+	if err != nil {
+		return fmt.Errorf("upload: %w", err)
+	}
+	fmt.Printf("[WA] Upload OK (url=%s)\n", upload.URL)
+
+	// Coba kirim ke phone JID (@s.whatsapp.net) selain chatJID (@lid)
+	targetJID := chatJID
+	if chatJID.Server == types.HiddenUserServer || strings.Contains(chatJID.String(), "@lid") {
+		targetJID = types.NewJID(chatJID.User, types.DefaultUserServer)
+		fmt.Printf("[WA] Convert @lid → @s.whatsapp.net: %s\n", targetJID)
+	}
+
+	imageMsg := &waE2E.ImageMessage{
+		Caption:       proto.String(caption),
+		Mimetype:      proto.String(mime),
+		URL:           &upload.URL,
+		DirectPath:    &upload.DirectPath,
+		MediaKey:      upload.MediaKey,
+		FileEncSHA256: upload.FileEncSHA256,
+		FileSHA256:    upload.FileSHA256,
+		FileLength:    &upload.FileLength,
+	}
+
+	_, err = c.client.SendMessage(ctx, targetJID, &waE2E.Message{ImageMessage: imageMsg})
+	if err != nil {
+		return fmt.Errorf("send image: %w", err)
+	}
+	fmt.Printf("[WA] Image terkirim!\n")
+	return nil
+}
+
 func (c *Client) SendReply(ctx context.Context, chatJID types.JID, text string) error {
 	msg := &waE2E.Message{
 		Conversation: proto.String(text),
@@ -143,4 +199,26 @@ func extractPhone(jid string) string {
 
 func normalizePhone(phone string) string {
 	return strings.TrimSpace(phone)
+}
+
+func bytesHasPrefix(data, prefix []byte) bool {
+	return len(data) >= len(prefix) && string(data[:len(prefix)]) == string(prefix)
+}
+
+func httpGet(url string) ([]byte, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; MaingoBot/1.0)")
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 5<<20))
 }

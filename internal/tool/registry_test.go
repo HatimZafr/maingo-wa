@@ -6,9 +6,17 @@ import (
 	"testing"
 )
 
-func TestRegistryScanYAML(t *testing.T) {
+func makeTestTool(t *testing.T, name, yaml string) (Tool, error) {
+	t.Helper()
 	dir := t.TempDir()
-	path := dir + "/test_tool.yml"
+	path := dir + "/" + name
+	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+		return nil, err
+	}
+	return ParseYAMLTool(path, Config{ShellTimeoutSec: 5, HTTPTimeoutSec: 5})
+}
+
+func TestParseYAMLTool(t *testing.T) {
 	yaml := `
 name: test_tool
 description: A test tool
@@ -16,32 +24,14 @@ parameters:
   - name: input
     type: string
     required: true
-    description: An input parameter
+    description: Input
 executor:
   type: shell
   command: "echo {{.input}}"
 `
-	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+	tool, err := makeTestTool(t, "test_tool.yml", yaml)
+	if err != nil {
 		t.Fatal(err)
-	}
-
-	reg := NewRegistry(Config{
-		DefinitionsDir:  dir,
-		ShellTimeoutSec: 5,
-		HTTPTimeoutSec:  5,
-	})
-
-	if err := reg.Scan(); err != nil {
-		t.Fatal(err)
-	}
-
-	if reg.Count() != 1 {
-		t.Fatalf("expected 1 tool, got %d", reg.Count())
-	}
-
-	tool, ok := reg.Get("test_tool")
-	if !ok {
-		t.Fatal("tool not found")
 	}
 	if tool.Metadata().Name != "test_tool" {
 		t.Errorf("name = %q", tool.Metadata().Name)
@@ -49,30 +39,20 @@ executor:
 }
 
 func TestRegistryExecuteShell(t *testing.T) {
-	dir := t.TempDir()
-	path := dir + "/echo.yml"
-	yaml := `
+	tool, _ := makeTestTool(t, "echo.yml", `
 name: echo
 description: Echo input
 parameters:
   - name: text
     type: string
     required: true
-    description: Text to echo
+    description: Text
 executor:
   type: shell
   command: "echo {{.text}}"
-`
-	os.WriteFile(path, []byte(yaml), 0644)
-
-	reg := NewRegistry(Config{
-		DefinitionsDir:  dir,
-		ShellTimeoutSec: 5,
-		HTTPTimeoutSec:  5,
-	})
-	if err := reg.Scan(); err != nil {
-		t.Fatal(err)
-	}
+`)
+	reg := NewRegistry(Config{ShellTimeoutSec: 5, HTTPTimeoutSec: 5})
+	reg.Register(tool)
 
 	result, err := reg.Execute(context.Background(), "echo", `{"text": "hello world"}`)
 	if err != nil {
@@ -92,9 +72,7 @@ func TestRegistryExecuteUnknownTool(t *testing.T) {
 }
 
 func TestValidationWrongType(t *testing.T) {
-	dir := t.TempDir()
-	path := dir + "/num.yml"
-	yaml := `
+	tool, _ := makeTestTool(t, "num.yml", `
 name: num_tool
 description: Test
 parameters:
@@ -105,15 +83,9 @@ parameters:
 executor:
   type: shell
   command: "echo {{.count}}"
-`
-	os.WriteFile(path, []byte(yaml), 0644)
-
-	reg := NewRegistry(Config{
-		DefinitionsDir:  dir,
-		ShellTimeoutSec: 5,
-		HTTPTimeoutSec:  5,
-	})
-	reg.Scan()
+`)
+	reg := NewRegistry(Config{ShellTimeoutSec: 5, HTTPTimeoutSec: 5})
+	reg.Register(tool)
 
 	_, err := reg.Execute(context.Background(), "num_tool", `{"count": "bukan_angka"}`)
 	if err == nil {
@@ -122,9 +94,7 @@ executor:
 }
 
 func TestValidationRegex(t *testing.T) {
-	dir := t.TempDir()
-	path := dir + "/regex_tool.yml"
-	yaml := `
+	tool, _ := makeTestTool(t, "regex.yml", `
 name: regex_tool
 description: Test
 parameters:
@@ -136,15 +106,9 @@ parameters:
 executor:
   type: shell
   command: "echo {{.url}}"
-`
-	os.WriteFile(path, []byte(yaml), 0644)
-
-	reg := NewRegistry(Config{
-		DefinitionsDir:  dir,
-		ShellTimeoutSec: 5,
-		HTTPTimeoutSec:  5,
-	})
-	reg.Scan()
+`)
+	reg := NewRegistry(Config{ShellTimeoutSec: 5, HTTPTimeoutSec: 5})
+	reg.Register(tool)
 
 	_, err := reg.Execute(context.Background(), "regex_tool", `{"url": "http://evil.com"}`)
 	if err == nil {
@@ -153,9 +117,7 @@ executor:
 }
 
 func TestHTTPExecutorSSRFBlock(t *testing.T) {
-	dir := t.TempDir()
-	path := dir + "/fetch.yml"
-	yaml := `
+	tool, _ := makeTestTool(t, "fetch.yml", `
 name: fetch
 description: Fetch URL
 parameters:
@@ -167,15 +129,9 @@ executor:
   type: http
   method: GET
   url: "{{.url}}"
-`
-	os.WriteFile(path, []byte(yaml), 0644)
-
-	reg := NewRegistry(Config{
-		DefinitionsDir:  dir,
-		ShellTimeoutSec: 5,
-		HTTPTimeoutSec:  5,
-	})
-	reg.Scan()
+`)
+	reg := NewRegistry(Config{ShellTimeoutSec: 5, HTTPTimeoutSec: 5})
+	reg.Register(tool)
 
 	_, err := reg.Execute(context.Background(), "fetch", `{"url": "http://127.0.0.1:8080/"}`)
 	if err == nil {
@@ -184,19 +140,16 @@ executor:
 }
 
 func TestAllReturnsDefs(t *testing.T) {
-	dir := t.TempDir()
-	path := dir + "/tool_a.yml"
-	os.WriteFile(path, []byte(`
+	tool, _ := makeTestTool(t, "tool_a.yml", `
 name: tool_a
 description: A
 parameters: []
 executor:
   type: shell
   command: "true"
-`), 0644)
-
-	reg := NewRegistry(Config{DefinitionsDir: dir, ShellTimeoutSec: 5, HTTPTimeoutSec: 5})
-	reg.Scan()
+`)
+	reg := NewRegistry(Config{ShellTimeoutSec: 5, HTTPTimeoutSec: 5})
+	reg.Register(tool)
 
 	defs := reg.All()
 	if len(defs) != 1 {

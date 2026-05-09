@@ -17,3 +17,10 @@ http_timeout_sec = 15
 [session]
 db_path = "session.db"
 max_history = 50
+
+[env]
+# Env vars untuk tool eksternal (mayar, dll)
+# Bot akan set env ini otomatis saat startup
+# Jangan overwrite env yang sudah ada
+MAYAR_API_KEY = "mk_test_xxxxxxxxxxxx"
+MAYAR_API_URL = "https://api.mayar.club/hl/v1"

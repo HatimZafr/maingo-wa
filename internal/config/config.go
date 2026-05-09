@@ -8,10 +8,11 @@ import (
 )
 
 type Config struct {
-	WhatsApp WhatsAppConfig `toml:"whatsapp"`
-	LLM      LLMConfig      `toml:"llm"`
-	Tools    ToolsConfig    `toml:"tools"`
-	Session  SessionConfig  `toml:"session"`
+	WhatsApp WhatsAppConfig    `toml:"whatsapp"`
+	LLM      LLMConfig         `toml:"llm"`
+	Tools    ToolsConfig       `toml:"tools"`
+	Session  SessionConfig     `toml:"session"`
+	Env      map[string]string `toml:"env"`
 }
 
 type WhatsAppConfig struct {
@@ -56,7 +57,22 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	if err := cfg.ApplyEnv(); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
+}
+
+func (c *Config) ApplyEnv() error {
+	for k, v := range c.Env {
+		if os.Getenv(k) == "" {
+			if err := os.Setenv(k, v); err != nil {
+				return fmt.Errorf("gagal set env %s: %w", k, err)
+			}
+		}
+	}
+	return nil
 }
 
 func (c *Config) validate() error {

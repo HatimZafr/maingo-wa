@@ -27,6 +27,7 @@ type Config struct {
 
 type WhatsAppSender interface {
 	SendReply(ctx context.Context, chatJID types.JID, text string) error
+	SendImage(ctx context.Context, chatJID types.JID, imageURL, caption string) error
 	SendTyping(ctx context.Context, chatJID types.JID) error
 	SendTypingStop(ctx context.Context, chatJID types.JID) error
 	MarkRead(ctx context.Context, chatJID, senderJID types.JID, msgID types.MessageID) error
@@ -83,7 +84,7 @@ func (a *Agent) HandleMessage(ctx context.Context, senderPhone string, chatJID t
 		toolDefs = append(toolDefs, toolDefToLLM(td))
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	for round := 0; round < a.maxRounds; round++ {
@@ -91,7 +92,8 @@ func (a *Agent) HandleMessage(ctx context.Context, senderPhone string, chatJID t
 		resp, err := a.llm.Chat(ctx, llmMessages, toolDefs)
 		if err != nil {
 			fmt.Printf("[AGENT] LLM error: %v\n", err)
-			_ = a.wa.SendReply(ctx, chatJID, "Maaf, ada kendala teknis. Coba lagi nanti.")
+			_ = a.wa.SendTypingStop(context.Background(), chatJID)
+			_ = a.wa.SendReply(context.Background(), chatJID, "Maaf, ada kendala teknis. Coba lagi nanti.")
 			return fmt.Errorf("LLM call: %w", err)
 		}
 
@@ -106,6 +108,12 @@ func (a *Agent) HandleMessage(ctx context.Context, senderPhone string, chatJID t
 
 			reply := cleanWhatsApp(msg.Content)
 			_ = a.wa.SendTypingStop(ctx, chatJID)
+				// Deteksi & kirim gambar dari URL di response
+				for _, imgURL := range extractImageURLs(msg.Content) {
+					if err := a.wa.SendImage(context.Background(), chatJID, imgURL, ""); err != nil {
+						fmt.Printf("[AGENT] SendImage error: %v\n", err)
+					}
+				}
 				return a.wa.SendReply(ctx, chatJID, reply)
 		}
 
@@ -212,6 +220,18 @@ func cleanWhatsApp(s string) string {
 		s = s[:3997] + "..."
 	}
 	return s
+}
+
+var imgURLRe = regexp.MustCompile(`https?://[^\s"'<>]*(?:png|jpg|jpeg|gif|webp)[^\s"'<>]*`)
+
+func extractImageURLs(s string) []string {
+	urls := imgURLRe.FindAllString(s, 3)
+	var clean []string
+	for _, u := range urls {
+		u = strings.TrimRight(u, ")]}',;.\"")
+		clean = append(clean, u)
+	}
+	return clean
 }
 
 func truncate(s string, maxLen int) string {
